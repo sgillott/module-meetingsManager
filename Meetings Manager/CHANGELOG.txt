@@ -1,0 +1,10 @@
+CHANGELOG
+=========
+
+v0.1.00
+-------
+Initial module skeleton: six tables (meetingsManagerCalendar, meetingsManagerDefinition,
+meetingsManagerAudienceRule, meetingsManagerSelectedDate, meetingsManagerOccurrence,
+meetingsManagerException), gibbonCalendarEventTypeID module setting, View Meetings / Manage
+Meetings / Manage Meetings Manager Settings actions, and Domain gateways. No wizard, resolver,
+audience resolution, or Calendar generation logic yet.
