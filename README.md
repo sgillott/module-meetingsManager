@@ -6,7 +6,7 @@ right dates - automatically. It reuses Gibbon's own Calendar, timetable, staff, 
 Space data rather than keeping a separate copy of any of it, so generated meetings appear on every
 participant's Calendar and Timetable exactly like any other native Gibbon event.
 
-Built for Gibbon `v31.0.00+`.
+Built for Gibbon `v30.0.00+`.
 
 ## Contents
 
@@ -48,7 +48,7 @@ Built for Gibbon `v31.0.00+`.
 
 ## Requirements
 
-- Gibbon `v31.0.00` or later.
+- Gibbon `v30.0.00` or later.
 - A Gibbon Admin account to install the module.
 - The **Manage Meetings** permission (see [Permissions](#permissions)) to create and manage
   meetings.

@@ -147,10 +147,40 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addLabel('singleDate', __('Date'));
         $row->addDate('singleDate')->setValue($currentSingleDate['date'] ?? '');
 
+    // Selected Dates - the list and Add Date control live in the Schedule section itself, the same
+    // way the Audience list/Add Rule picker live in the Audience section: one submit-type button
+    // inside $form's own <form>, redirected to a different endpoint via formaction, rather than a
+    // separate <form> rendered as its own panel below Submit.
     $form->toggleVisibilityByClass('scheduleSelectedDates')->onSelect('scheduleType')->when('SelectedDates');
+
+    $selectedDates = $container->get(MeetingSelectedDateGateway::class)->selectDatesByDefinition($meetingsManagerDefinitionID)->fetchAll();
+
     $row = $form->addRow()->addClass('scheduleSelectedDates');
-        $row->addLabel('', '');
-        $row->addContent('<i>'.__('Manage the selected dates below.').'</i>');
+        $row->addLabel('', __('Selected Dates'));
+        if (empty($selectedDates)) {
+            $row->addContent('<p><i>'.__('No dates have been added yet.').'</i></p>');
+        } else {
+            $datesHtml = '<table class="smallIntBorder w-full">';
+            foreach ($selectedDates as $selectedDate) {
+                $datesHtml .= '<tr><td>'.Format::date($selectedDate['date']).'</td><td class="w-16 text-right">';
+                $datesHtml .= '<a class="text-red-700" href="'.$session->get('absoluteURL').'/modules/Meetings Manager/meeting_manage_edit_date_deleteProcess.php?meetingsManagerSelectedDateID='.$selectedDate['meetingsManagerSelectedDateID'].'&meetingsManagerDefinitionID='.$meetingsManagerDefinitionID.'&gibbonSchoolYearID='.$gibbonSchoolYearID.'" onclick="return confirm(\''.__('Are you sure you want to remove this date?').'\')">'.__('Remove').'</a>';
+                $datesHtml .= '</td></tr>';
+            }
+            $datesHtml .= '</table>';
+            $row->addContent($datesHtml);
+        }
+
+    $row = $form->addRow()->addClass('scheduleSelectedDates');
+        $row->addLabel('date', __('Add Date'));
+        $row->addDate('date');
+
+    $addDateAction = $session->get('absoluteURL').'/modules/'.$session->get('module').'/meeting_manage_edit_date_addProcess.php';
+    $addDateButton = $form->getFactory()->createSubmit(__('Add Date'))
+        ->setAttribute('formaction', $addDateAction)
+        ->setAttribute('formnovalidate', true);
+
+    $row = $form->addRow()->addClass('scheduleSelectedDates');
+        $row->addElement($addDateButton);
 
     $form->toggleVisibilityByClass('scheduleWeekly')->onSelect('scheduleType')->when('Weekly');
     $daysOfWeek = $container->get(DaysOfWeekGateway::class)->selectSchoolWeekdays()->fetchAll();
@@ -199,42 +229,6 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addSubmit();
 
     echo $form->getOutput();
-
-    // ---------------------------------------------------------------
-    // Selected Dates (only relevant for the SelectedDates schedule type)
-    // ---------------------------------------------------------------
-
-    if ($definition['scheduleType'] === 'SelectedDates') {
-        echo '<h3>'.__('Selected Dates').'</h3>';
-
-        $dates = $container->get(MeetingSelectedDateGateway::class)->selectDatesByDefinition($meetingsManagerDefinitionID)->fetchAll();
-
-        if (empty($dates)) {
-            echo '<p><i>'.__('No dates have been added yet.').'</i></p>';
-        } else {
-            echo '<table class="smallIntBorder w-full">';
-            foreach ($dates as $date) {
-                echo '<tr><td>'.Format::date($date['date']).'</td><td class="w-16 text-right">';
-                echo '<a class="text-red-700" href="'.$session->get('absoluteURL').'/modules/Meetings Manager/meeting_manage_edit_date_deleteProcess.php?meetingsManagerSelectedDateID='.$date['meetingsManagerSelectedDateID'].'&meetingsManagerDefinitionID='.$meetingsManagerDefinitionID.'&gibbonSchoolYearID='.$gibbonSchoolYearID.'" onclick="return confirm(\''.__('Are you sure you want to remove this date?').'\')">'.__('Remove').'</a>';
-                echo '</td></tr>';
-            }
-            echo '</table>';
-        }
-
-        $dateForm = Form::create('addDate', $session->get('absoluteURL').'/modules/'.$session->get('module').'/meeting_manage_edit_date_addProcess.php');
-        $dateForm->addHiddenValue('address', $session->get('address'));
-        $dateForm->addHiddenValue('meetingsManagerDefinitionID', $meetingsManagerDefinitionID);
-        $dateForm->addHiddenValue('gibbonSchoolYearID', $gibbonSchoolYearID);
-
-        $row = $dateForm->addRow();
-            $row->addLabel('date', __('Add Date'));
-            $row->addDate('date')->required();
-
-        $row = $dateForm->addRow();
-            $row->addSubmit(__('Add Date'));
-
-        echo $dateForm->getOutput();
-    }
 
     }
 }

@@ -23,13 +23,11 @@ class AudienceResolver
 {
     private $db;
     private $staffGateway;
-    private $departmentStaffGateway;
 
-    public function __construct(Connection $db, StaffGateway $staffGateway, DepartmentStaffGateway $departmentStaffGateway)
+    public function __construct(Connection $db, StaffGateway $staffGateway)
     {
         $this->db = $db;
         $this->staffGateway = $staffGateway;
-        $this->departmentStaffGateway = $departmentStaffGateway;
     }
 
     /**
@@ -177,14 +175,41 @@ class AudienceResolver
         return $this->db->select($sql, ['gibbonSchoolYearID' => $gibbonSchoolYearID, 'gibbonYearGroupID' => $gibbonYearGroupID])->fetchAll();
     }
 
+    /**
+     * Members of the given Department, via gibbonDepartmentStaff. Prefers core's own
+     * DepartmentStaffGateway when it's actually available - checked at runtime with class_exists()/
+     * method_exists() rather than a hardcoded Gibbon version number, so this automatically keeps
+     * using the real gateway on any install where it exists (including future ones), and only ever
+     * falls back to an equivalent direct SQL query on installs where it doesn't (confirmed missing
+     * from the container on at least one tested Gibbon v30 install - a NotFoundException there,
+     * since the whole AudienceResolver object has to resolve even when no Department rule exists
+     * yet, if it were still a constructor dependency).
+     */
+    private function selectDepartmentMembers($gibbonDepartmentID): array
+    {
+        if (class_exists(DepartmentStaffGateway::class) && method_exists(DepartmentStaffGateway::class, 'seletStaffListByDepartment')) {
+            return (new DepartmentStaffGateway($this->db))->seletStaffListByDepartment($gibbonDepartmentID)->fetchAll();
+        }
+
+        $sql = "SELECT gibbonPerson.gibbonPersonID, gibbonDepartmentStaff.role, gibbonPerson.title, gibbonPerson.preferredName, gibbonPerson.surname
+                FROM gibbonDepartmentStaff
+                JOIN gibbonPerson ON (gibbonDepartmentStaff.gibbonPersonID = gibbonPerson.gibbonPersonID)
+                JOIN gibbonStaff ON (gibbonStaff.gibbonPersonID = gibbonPerson.gibbonPersonID)
+                WHERE gibbonPerson.status = 'Full'
+                AND gibbonDepartmentStaff.gibbonDepartmentID = :gibbonDepartmentID
+                ORDER BY gibbonPerson.surname, gibbonPerson.preferredName";
+
+        return $this->db->select($sql, ['gibbonDepartmentID' => $gibbonDepartmentID])->fetchAll();
+    }
+
     private function selectStaffByDepartment($gibbonDepartmentID): array
     {
-        return $this->departmentStaffGateway->seletStaffListByDepartment($gibbonDepartmentID)->fetchAll();
+        return $this->selectDepartmentMembers($gibbonDepartmentID);
     }
 
     private function selectDepartmentCoordinators($gibbonDepartmentID): array
     {
-        $members = $this->departmentStaffGateway->seletStaffListByDepartment($gibbonDepartmentID)->fetchAll();
+        $members = $this->selectDepartmentMembers($gibbonDepartmentID);
 
         return array_values(array_filter($members, function ($member) {
             return ($member['role'] ?? '') === 'Coordinator';

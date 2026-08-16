@@ -25,7 +25,7 @@ $description = 'Define recurring meetings and generate native Gibbon Calendar ev
 $entryURL    = "meeting_manage.php";   // The landing page for the unit, used in the main menu
 $type        = "Additional";  // Do not change.
 $category    = 'Other';            // The main menu area to place the module in
-$version     = '0.7.00';            // Version number
+$version     = '0.8.00';            // Version number
 $author      = 'Steve Gillott';            // Your name
 $url         = '';            // Your URL
 

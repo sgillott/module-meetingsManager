@@ -114,3 +114,19 @@ $sql[$count][1] = "UPDATE gibbonAction SET category='Settings' WHERE name='Manag
 -- purely on the letter A. Renaming this action's category to 'Settings' (a name already used the
 -- same way by several core modules) is the only lever available from inside the module to make
 -- 'Manage Meetings' appear first, as requested.";
+
+// v0.8.00
+$count++;
+$sql[$count][0] = "0.8.00";
+$sql[$count][1] = "-- No schema or data changes - both fixes in this version are code-only.
+-- AudienceResolver no longer depends on core's DepartmentStaffGateway class, which was found not to
+-- be resolvable via the container on at least one tested Gibbon v30 install (a working
+-- 'Department'/'Department Coordinator' audience rule threw League\\Container\\Exception\\NotFoundException
+-- on that install as soon as any part of the Audience section was rendered, since the whole
+-- AudienceResolver object - and therefore its full constructor - has to resolve even when no
+-- Department rule exists yet). Replaced with a direct SQL query against gibbonDepartmentStaff,
+-- matching the raw-SQL idiom every other audience rule type in that class already uses.
+-- Selected Dates (the list of dates and the Add Date control, for the SelectedDates schedule type)
+-- now lives inside the Schedule section on meeting_manage_edit.php itself, the same way the
+-- Audience list/Add Rule picker was folded into the Audience section - previously it was a
+-- separate <form> rendered as its own panel below Submit.";
