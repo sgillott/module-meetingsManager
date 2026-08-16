@@ -371,7 +371,9 @@ class MeetingReconciler
             || $event['dateStart'] !== $effective['date']
             || $event['timeStart'] !== $effective['timeStart']
             || $event['timeEnd'] !== $effective['timeEnd']
-            || (string) $event['locationDetail'] !== (string) ($definition['location'] ?? '')
+            || $event['locationType'] !== ($definition['locationType'] ?? 'External')
+            || (int) ($event['gibbonSpaceID'] ?? 0) !== (int) ($definition['gibbonSpaceID'] ?? 0)
+            || (string) $event['locationDetail'] !== (string) ($definition['locationDetail'] ?? '')
             || (int) $event['gibbonPersonIDOrganiser'] !== (int) $definition['gibbonPersonIDOrganiser'];
     }
 

@@ -52,3 +52,65 @@ UPDATE gibbonAction SET URLList='meeting_manage.php,meeting_manage_add.php,meeti
 -- Adds meetingsManagerExcludedDate, a definition-level veto MeetingDateResolver checks before every
 -- other willGenerate rule - lets a candidate date be excluded from Preview, independent of whether
 -- it was ever generated. Also registers the two new Preview-page process scripts that manage it.";
+
+// v0.5.00
+$count++;
+$sql[$count][0] = "0.5.00";
+$sql[$count][1] = "ALTER TABLE meetingsManagerDefinition
+    ADD COLUMN locationType enum('Internal','External') NOT NULL DEFAULT 'External' AFTER description,
+    ADD COLUMN gibbonSpaceID int(10) UNSIGNED ZEROFILL DEFAULT NULL AFTER locationType,
+    CHANGE COLUMN location locationDetail varchar(255) DEFAULT NULL,
+    ADD KEY gibbonSpaceID (gibbonSpaceID)
+;end
+UPDATE gibbonAction SET name='Manage Meetings_all', precedence=1, category='Manage Meetings', description='Create, edit, and archive any meeting definition, and generate their native Calendar events.', URLList='meeting_manage.php,meeting_manage_add.php,meeting_manage_addProcess.php,meeting_manage_edit.php,meeting_manage_editProcess.php,meeting_manage_edit_date_addProcess.php,meeting_manage_edit_date_deleteProcess.php,meeting_manage_edit_audience_addProcess.php,meeting_manage_edit_audience_deleteProcess.php,meeting_manage_archiveProcess.php,meeting_manage_unarchiveProcess.php,meeting_manage_preview.php,meeting_manage_preview_excludeDateProcess.php,meeting_manage_preview_includeDateProcess.php,meeting_manage_generateProcess.php,meeting_manage_refreshParticipantsProcess.php,meeting_manage_occurrences.php,meeting_manage_occurrence_exception.php,meeting_manage_occurrence_exceptionProcess.php,meeting_manage_occurrence_exception_deleteProcess.php' WHERE name='Manage Meetings' AND gibbonModuleID=(SELECT gibbonModuleID FROM gibbonModule WHERE name='Meetings Manager')
+;end
+INSERT INTO gibbonAction (gibbonModuleID, name, precedence, category, description, URLList, entryURL, entrySidebar, menuShow, defaultPermissionAdmin, defaultPermissionTeacher, defaultPermissionStudent, defaultPermissionParent, defaultPermissionSupport, categoryPermissionStaff, categoryPermissionStudent, categoryPermissionParent, categoryPermissionOther) VALUES ((SELECT gibbonModuleID FROM gibbonModule WHERE name='Meetings Manager'), 'Manage Meetings_my', 0, 'Manage Meetings', 'Create, edit, and archive meeting definitions the user organises, and generate their native Calendar events. Cannot see or act on meetings organised by anyone else.', 'meeting_manage.php,meeting_manage_add.php,meeting_manage_addProcess.php,meeting_manage_edit.php,meeting_manage_editProcess.php,meeting_manage_edit_date_addProcess.php,meeting_manage_edit_date_deleteProcess.php,meeting_manage_edit_audience_addProcess.php,meeting_manage_edit_audience_deleteProcess.php,meeting_manage_archiveProcess.php,meeting_manage_unarchiveProcess.php,meeting_manage_preview.php,meeting_manage_preview_excludeDateProcess.php,meeting_manage_preview_includeDateProcess.php,meeting_manage_generateProcess.php,meeting_manage_refreshParticipantsProcess.php,meeting_manage_occurrences.php,meeting_manage_occurrence_exception.php,meeting_manage_occurrence_exceptionProcess.php,meeting_manage_occurrence_exception_deleteProcess.php', 'meeting_manage.php', 'Y', 'Y', 'N', 'Y', 'N', 'N', 'N', 'Y', 'N', 'N', 'N')
+;end
+INSERT INTO gibbonPermission (permissionID, gibbonRoleID, gibbonActionID) VALUES (NULL, '002', (SELECT gibbonActionID FROM gibbonAction WHERE name='Manage Meetings_my' AND gibbonModuleID=(SELECT gibbonModuleID FROM gibbonModule WHERE name='Meetings Manager')))
+;end
+-- Unarchive: no schema change needed - archiveDefinition() already deletes future occurrences/events
+-- entirely and leaves past ones untouched, so flipping active back to Y is the whole operation.
+-- Location: locationType/gibbonSpaceID mirror core Calendar's own Internal/External model exactly.
+-- The DEFAULT 'External' on locationType is deliberate - every existing definition's location was
+-- always written as External free text, so the schema default preserves that meaning for existing
+-- rows. 'Internal' is only the default for brand-new meetings, applied in the Add form itself.
+-- Permissions: splits the single admin-only 'Manage Meetings' action into a precedence-ordered
+-- _all/_my pair, mirroring core's Behaviour module convention exactly. Renaming the existing action
+-- in place (rather than deleting and recreating) preserves every existing gibbonPermission grant on
+-- it untouched. Manage Meetings_my is auto-granted to Teacher (role 002), matching Behaviour's own
+-- installed default.";
+
+// v0.6.00
+$count++;
+$sql[$count][0] = "0.6.00";
+$sql[$count][1] = "ALTER TABLE meetingsManagerExcludedDate
+    ADD COLUMN type enum('Exclude','Include') NOT NULL DEFAULT 'Exclude' AFTER date
+;end
+RENAME TABLE meetingsManagerExcludedDate TO meetingsManagerDateOverride
+;end
+ALTER TABLE meetingsManagerDateOverride
+    CHANGE COLUMN meetingsManagerExcludedDateID meetingsManagerDateOverrideID int(10) UNSIGNED ZEROFILL NOT NULL AUTO_INCREMENT
+;end
+ALTER TABLE meetingsManagerAudienceRule
+    MODIFY COLUMN type enum('AllTeachingStaff','AllStaff','YearGroup','Department','DepartmentCoordinator','Role','Individual','ExcludeIndividual') NOT NULL,
+    ADD COLUMN gibbonRoleID int(3) UNSIGNED ZEROFILL DEFAULT NULL AFTER gibbonDepartmentID,
+    ADD KEY gibbonRoleID (gibbonRoleID)
+;end
+-- Date override: generalizes the previous Exclude-only table into a proper two-way override (see
+-- MeetingDateResolver::annotate() and the two meeting_manage_preview_*DateProcess.php scripts) - a
+-- human can now force a naturally-excluded date (School Closure, Not a School Day) to publish
+-- anyway, not just veto a date that would otherwise generate. Existing rows all become type='Exclude',
+-- which is exactly what they already meant under the old single-purpose table.
+-- Audience: adds 'AllStaff' (broader than 'AllTeachingStaff') and 'Role' (members of a given
+-- Gibbon Role, primary or secondary) as new audience rule types, alongside the existing ones.";
+
+// v0.7.00
+$count++;
+$sql[$count][0] = "0.7.00";
+$sql[$count][1] = "UPDATE gibbonAction SET category='Settings' WHERE name='Manage Meetings Manager Settings' AND category='Admin' AND gibbonModuleID=(SELECT gibbonModuleID FROM gibbonModule WHERE name='Meetings Manager')
+;end
+-- Core's sidebar sub-menu (ModuleGateway::selectModuleActionsByRole()) sorts a module's action
+-- categories alphabetically with no configurable override - 'Admin' sorted before 'Manage Meetings'
+-- purely on the letter A. Renaming this action's category to 'Settings' (a name already used the
+-- same way by several core modules) is the only lever available from inside the module to make
+-- 'Manage Meetings' appear first, as requested.";

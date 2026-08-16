@@ -58,6 +58,11 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         return;
     }
 
+    if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+        $page->addError(__('You do not have access to this action.'));
+        return;
+    }
+
     // Everything on this page down to "Create / Update Generated Events" is deterministic and
     // read-only: MeetingDateResolver, AudienceResolver, and MeetingReconciler::diff() only ever read
     // the stored Meeting Definition and current Calendar state. Nothing here writes a
@@ -87,8 +92,10 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
     echo '<table class="smallIntBorder w-full">';
     echo '<tr><td class="w-40"><b>'.__('Name').'</b></td><td>'.htmlspecialchars($definition['name']).'</td></tr>';
     echo '<tr><td><b>'.__('Organiser').'</b></td><td>'.htmlspecialchars($definition['organiserName'] ?? '').'</td></tr>';
-    if (!empty($definition['location'])) {
-        echo '<tr><td><b>'.__('Location').'</b></td><td>'.htmlspecialchars($definition['location']).'</td></tr>';
+    if ($definition['locationType'] === 'Internal' && !empty($definition['spaceName'])) {
+        echo '<tr><td><b>'.__('Location').'</b></td><td>'.htmlspecialchars($definition['spaceName']).'</td></tr>';
+    } elseif ($definition['locationType'] === 'External' && !empty($definition['locationDetail'])) {
+        echo '<tr><td><b>'.__('Location').'</b></td><td>'.htmlspecialchars($definition['locationDetail']).'</td></tr>';
     }
     if (!empty($definition['description'])) {
         echo '<tr><td><b>'.__('Description').'</b></td><td>'.nl2br(htmlspecialchars($definition['description'])).'</td></tr>';
@@ -218,21 +225,17 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
             echo '<td>'.Format::time($candidate['timeStart']).'-'.Format::time($candidate['timeEnd']).'</td>';
 
             echo '<td class="text-center">';
-            if (!empty($candidate['schoolClosure'])) {
-                echo '<input type="checkbox" disabled title="'.__('School Closure cannot be overridden here.').'">';
-            } else {
-                echo '<form method="get" action="'.($candidate['willGenerate'] ? $excludeDateURL : $includeDateURL).'" style="display:inline;">';
-                echo '<input type="hidden" name="date" value="'.$candidate['date'].'">';
-                echo '<input type="hidden" name="meetingsManagerDefinitionID" value="'.$meetingsManagerDefinitionID.'">';
-                echo '<input type="hidden" name="gibbonSchoolYearID" value="'.htmlspecialchars($gibbonSchoolYearID).'">';
-                echo '<input type="checkbox" '.($candidate['willGenerate'] ? 'checked' : '').' onchange="'
-                    .'var f=this.form;'
-                    .'f.action=this.checked?&quot;'.$includeDateURL.'&quot;:&quot;'.$excludeDateURL.'&quot;;'
-                    .'this.closest(&quot;tr&quot;).classList.toggle(&quot;error&quot;, !this.checked);'
-                    .'f.submit();'
-                    .'">';
-                echo '</form>';
-            }
+            echo '<form method="get" action="'.($candidate['willGenerate'] ? $excludeDateURL : $includeDateURL).'" style="display:inline;">';
+            echo '<input type="hidden" name="date" value="'.$candidate['date'].'">';
+            echo '<input type="hidden" name="meetingsManagerDefinitionID" value="'.$meetingsManagerDefinitionID.'">';
+            echo '<input type="hidden" name="gibbonSchoolYearID" value="'.htmlspecialchars($gibbonSchoolYearID).'">';
+            echo '<input type="checkbox" '.($candidate['willGenerate'] ? 'checked' : '').' onchange="'
+                .'var f=this.form;'
+                .'f.action=this.checked?&quot;'.$includeDateURL.'&quot;:&quot;'.$excludeDateURL.'&quot;;'
+                .'this.closest(&quot;tr&quot;).classList.toggle(&quot;error&quot;, !this.checked);'
+                .'f.submit();'
+                .'">';
+            echo '</form>';
             echo '</td>';
 
             $context = [];

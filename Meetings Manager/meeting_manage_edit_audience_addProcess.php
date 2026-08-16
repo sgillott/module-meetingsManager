@@ -25,6 +25,7 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingAudienceRuleGateway;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $_POST = $container->get(Validator::class)->sanitize($_POST);
 
@@ -32,10 +33,11 @@ $meetingsManagerDefinitionID = $_POST['meetingsManagerDefinitionID'] ?? '';
 $gibbonSchoolYearID = $_POST['gibbonSchoolYearID'] ?? '';
 $type = $_POST['type'] ?? '';
 
-// Year Group/Department/Staff fields are multi-select - each selected value becomes its own rule
-// row, so picking 3 Year Groups in one submission is 3 rules, not one rule with 3 targets.
+// Year Group/Department/Role/Staff fields are multi-select - each selected value becomes its own
+// rule row, so picking 3 Year Groups in one submission is 3 rules, not one rule with 3 targets.
 $gibbonYearGroupIDs = (array) ($_POST['gibbonYearGroupID'] ?? []);
 $gibbonDepartmentIDs = (array) ($_POST['gibbonDepartmentID'] ?? []);
+$gibbonRoleIDs = (array) ($_POST['gibbonRoleID'] ?? []);
 $gibbonPersonIDs = (array) ($_POST['gibbonPersonID'] ?? []);
 
 // Reachable from both Edit (full rule management) and Preview (quick add/remove of an individual) -
@@ -49,7 +51,7 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
     exit;
 }
 
-$validTypes = ['AllTeachingStaff', 'YearGroup', 'Department', 'DepartmentCoordinator', 'Individual', 'ExcludeIndividual'];
+$validTypes = ['AllTeachingStaff', 'AllStaff', 'YearGroup', 'Department', 'DepartmentCoordinator', 'Role', 'Individual', 'ExcludeIndividual'];
 if (empty($meetingsManagerDefinitionID) || !in_array($type, $validTypes, true)) {
     $URL .= '&return=error1';
     header("Location: {$URL}");
@@ -65,14 +67,20 @@ if (empty($definition) || $definition['active'] != 'Y') {
     exit;
 }
 
+if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
+    header("Location: {$URL}");
+    exit;
+}
+
 $ruleGateway = $container->get(MeetingAudienceRuleGateway::class);
 
 // Never trust a posted target ID merely because it came from the form - re-validate every one
 // exists, and build the actual insert list only from values that passed validation.
 $rowsToInsert = [];
 
-if ($type === 'AllTeachingStaff') {
-    $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => null, 'gibbonPersonID' => null];
+if ($type === 'AllTeachingStaff' || $type === 'AllStaff') {
+    $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => null, 'gibbonRoleID' => null, 'gibbonPersonID' => null];
 } elseif ($type === 'YearGroup') {
     if (empty($gibbonYearGroupIDs)) {
         $URL .= '&return=error1';
@@ -82,7 +90,7 @@ if ($type === 'AllTeachingStaff') {
     $yearGroupGateway = $container->get(YearGroupGateway::class);
     foreach ($gibbonYearGroupIDs as $id) {
         if (!empty($yearGroupGateway->getByID($id))) {
-            $rowsToInsert[] = ['gibbonYearGroupID' => $id, 'gibbonDepartmentID' => null, 'gibbonPersonID' => null];
+            $rowsToInsert[] = ['gibbonYearGroupID' => $id, 'gibbonDepartmentID' => null, 'gibbonRoleID' => null, 'gibbonPersonID' => null];
         }
     }
 } elseif ($type === 'Department' || $type === 'DepartmentCoordinator') {
@@ -94,7 +102,18 @@ if ($type === 'AllTeachingStaff') {
     $departmentGateway = $container->get(DepartmentGateway::class);
     foreach ($gibbonDepartmentIDs as $id) {
         if (!empty($departmentGateway->getByID($id))) {
-            $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => $id, 'gibbonPersonID' => null];
+            $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => $id, 'gibbonRoleID' => null, 'gibbonPersonID' => null];
+        }
+    }
+} elseif ($type === 'Role') {
+    if (empty($gibbonRoleIDs)) {
+        $URL .= '&return=error1';
+        header("Location: {$URL}");
+        exit;
+    }
+    foreach ($gibbonRoleIDs as $id) {
+        if ((int) $pdo->selectOne('SELECT COUNT(*) FROM gibbonRole WHERE gibbonRoleID=:gibbonRoleID', ['gibbonRoleID' => $id]) > 0) {
+            $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => null, 'gibbonRoleID' => $id, 'gibbonPersonID' => null];
         }
     }
 } elseif ($type === 'Individual' || $type === 'ExcludeIndividual') {
@@ -106,7 +125,7 @@ if ($type === 'AllTeachingStaff') {
     $staffGateway = $container->get(StaffGateway::class);
     foreach ($gibbonPersonIDs as $id) {
         if ($staffGateway->selectStaffByID($id)->rowCount() > 0) {
-            $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => null, 'gibbonPersonID' => $id];
+            $rowsToInsert[] = ['gibbonYearGroupID' => null, 'gibbonDepartmentID' => null, 'gibbonRoleID' => null, 'gibbonPersonID' => $id];
         }
     }
 }

@@ -97,6 +97,10 @@ class AudienceResolver
                 return sprintf(__('Individual: %1$s'), $this->personName($rule));
             case 'ExcludeIndividual':
                 return sprintf(__('Exclude: %1$s'), $this->personName($rule));
+            case 'AllStaff':
+                return __('All Staff');
+            case 'Role':
+                return sprintf(__('Members of the %1$s Role'), $rule['roleName'] ?? __('Unknown Role'));
             default:
                 return $rule['type'];
         }
@@ -121,6 +125,10 @@ class AudienceResolver
                 return empty($rule['gibbonDepartmentID']) ? [] : $this->selectDepartmentCoordinators($rule['gibbonDepartmentID']);
             case 'Individual':
                 return empty($rule['gibbonPersonID']) ? [] : $this->selectIndividual($rule['gibbonPersonID']);
+            case 'AllStaff':
+                return $this->selectAllStaff();
+            case 'Role':
+                return empty($rule['gibbonRoleID']) ? [] : $this->selectStaffByRole($rule['gibbonRoleID']);
             default:
                 return [];
         }
@@ -186,5 +194,41 @@ class AudienceResolver
     private function selectIndividual($gibbonPersonID): array
     {
         return $this->staffGateway->selectStaffByID($gibbonPersonID)->fetchAll();
+    }
+
+    /**
+     * Every active staff member, teaching or not - same idiom as selectAllTeachingStaff() above,
+     * just without the gibbonStaff.type='Teaching' filter. Matches core's own "the staff list"
+     * shape (gibbonPerson JOIN gibbonStaff WHERE status='Full'), e.g. DatabaseFormFactory's own
+     * createSelectStaff().
+     */
+    private function selectAllStaff(): array
+    {
+        $sql = "SELECT gibbonPerson.gibbonPersonID, gibbonPerson.title, gibbonPerson.preferredName, gibbonPerson.surname
+                FROM gibbonPerson
+                JOIN gibbonStaff ON (gibbonStaff.gibbonPersonID = gibbonPerson.gibbonPersonID)
+                WHERE gibbonPerson.status = 'Full'
+                AND (gibbonPerson.dateStart IS NULL OR gibbonPerson.dateStart <= :today)
+                AND (gibbonPerson.dateEnd IS NULL OR gibbonPerson.dateEnd >= :today)
+                ORDER BY gibbonPerson.surname, gibbonPerson.preferredName";
+
+        return $this->db->select($sql, ['today' => date('Y-m-d')])->fetchAll();
+    }
+
+    /**
+     * Everyone holding the given Gibbon Role, whether as their primary role or one of their
+     * secondary roles (gibbonRoleIDAll is a CSV) - mirrors RoleGateway::queryUsersByRole()'s own
+     * join shape.
+     */
+    private function selectStaffByRole($gibbonRoleID): array
+    {
+        $sql = "SELECT DISTINCT gibbonPerson.gibbonPersonID, gibbonPerson.title, gibbonPerson.preferredName, gibbonPerson.surname
+                FROM gibbonPerson
+                JOIN gibbonRole ON (gibbonPerson.gibbonRoleIDPrimary = gibbonRole.gibbonRoleID OR FIND_IN_SET(gibbonRole.gibbonRoleID, gibbonPerson.gibbonRoleIDAll))
+                WHERE gibbonRole.gibbonRoleID = :gibbonRoleID
+                AND gibbonPerson.status = 'Full'
+                ORDER BY gibbonPerson.surname, gibbonPerson.preferredName";
+
+        return $this->db->select($sql, ['gibbonRoleID' => $gibbonRoleID])->fetchAll();
     }
 }

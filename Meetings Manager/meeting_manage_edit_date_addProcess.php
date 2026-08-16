@@ -22,6 +22,7 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $_POST = $container->get(Validator::class)->sanitize($_POST);
 
@@ -48,6 +49,12 @@ $definition = $definitionGateway->getByID($meetingsManagerDefinitionID);
 
 if (empty($definition) || $definition['active'] != 'Y' || $definition['scheduleType'] !== 'SelectedDates') {
     $URL .= '&return=error2';
+    header("Location: {$URL}");
+    exit;
+}
+
+if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
 }

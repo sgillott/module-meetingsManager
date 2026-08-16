@@ -30,12 +30,14 @@ class MeetingAudienceRuleGateway extends QueryableGateway
         $sql = "SELECT meetingsManagerAudienceRule.*,
                 gibbonYearGroup.name AS yearGroupName,
                 gibbonDepartment.name AS departmentName,
+                gibbonRole.name AS roleName,
                 gibbonPerson.title AS personTitle,
                 gibbonPerson.preferredName AS personPreferredName,
                 gibbonPerson.surname AS personSurname
                 FROM meetingsManagerAudienceRule
                 LEFT JOIN gibbonYearGroup ON (gibbonYearGroup.gibbonYearGroupID = meetingsManagerAudienceRule.gibbonYearGroupID)
                 LEFT JOIN gibbonDepartment ON (gibbonDepartment.gibbonDepartmentID = meetingsManagerAudienceRule.gibbonDepartmentID)
+                LEFT JOIN gibbonRole ON (gibbonRole.gibbonRoleID = meetingsManagerAudienceRule.gibbonRoleID)
                 LEFT JOIN gibbonPerson ON (gibbonPerson.gibbonPersonID = meetingsManagerAudienceRule.gibbonPersonID)
                 WHERE meetingsManagerAudienceRule.meetingsManagerDefinitionID = :meetingsManagerDefinitionID
                 ORDER BY meetingsManagerAudienceRule.meetingsManagerAudienceRuleID";

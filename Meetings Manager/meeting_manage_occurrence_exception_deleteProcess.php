@@ -17,11 +17,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingOccurrenceGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingExceptionGateway;
 use Gibbon\Module\MeetingsManager\MeetingReconciler;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $meetingsManagerOccurrenceID = $_GET['meetingsManagerOccurrenceID'] ?? '';
 $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
@@ -46,6 +48,13 @@ $occurrence = $occurrenceGateway->getByID($meetingsManagerOccurrenceID);
 
 if (empty($occurrence) || (string) $occurrence['meetingsManagerDefinitionID'] !== (string) $meetingsManagerDefinitionID) {
     $URL .= '&return=error2';
+    header("Location: {$URL}");
+    exit;
+}
+
+$definition = $container->get(MeetingDefinitionGateway::class)->getByID($meetingsManagerDefinitionID);
+if (empty($definition) || !meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
 }

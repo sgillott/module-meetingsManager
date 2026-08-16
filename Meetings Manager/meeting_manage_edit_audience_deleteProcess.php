@@ -21,6 +21,7 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingAudienceRuleGateway;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $meetingsManagerAudienceRuleID = $_GET['meetingsManagerAudienceRuleID'] ?? '';
 $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
@@ -48,6 +49,12 @@ $definition = $definitionGateway->getByID($meetingsManagerDefinitionID);
 
 if (empty($definition) || $definition['active'] != 'Y') {
     $URL .= '&return=error2';
+    header("Location: {$URL}");
+    exit;
+}
+
+if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
 }

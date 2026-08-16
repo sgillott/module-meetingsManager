@@ -25,7 +25,7 @@ $description = 'Define recurring meetings and generate native Gibbon Calendar ev
 $entryURL    = "meeting_manage.php";   // The landing page for the unit, used in the main menu
 $type        = "Additional";  // Do not change.
 $category    = 'Other';            // The main menu area to place the module in
-$version     = '0.4.00';            // Version number
+$version     = '0.7.00';            // Version number
 $author      = 'Steve Gillott';            // Your name
 $url         = '';            // Your URL
 
@@ -54,7 +54,9 @@ $moduleTables[] = "CREATE TABLE `meetingsManagerDefinition` (
     `gibbonSchoolYearID` int(3) UNSIGNED ZEROFILL NOT NULL,
     `name` varchar(120) NOT NULL,
     `description` text,
-    `location` varchar(255) DEFAULT NULL,
+    `locationType` enum('Internal','External') NOT NULL DEFAULT 'External',
+    `gibbonSpaceID` int(10) UNSIGNED ZEROFILL DEFAULT NULL,
+    `locationDetail` varchar(255) DEFAULT NULL,
     `gibbonPersonIDOrganiser` int(10) UNSIGNED ZEROFILL NOT NULL,
     `scheduleType` enum('Single','SelectedDates','Weekly','TimetableCycle') NOT NULL,
     `gibbonDaysOfWeekID` int(2) UNSIGNED ZEROFILL DEFAULT NULL,
@@ -72,6 +74,7 @@ $moduleTables[] = "CREATE TABLE `meetingsManagerDefinition` (
     KEY `gibbonSchoolYearID` (`gibbonSchoolYearID`),
     KEY `gibbonPersonIDOrganiser` (`gibbonPersonIDOrganiser`),
     KEY `gibbonTTDayID` (`gibbonTTDayID`),
+    KEY `gibbonSpaceID` (`gibbonSpaceID`),
     KEY `active` (`active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;";
 
@@ -80,14 +83,16 @@ $moduleTables[] = "CREATE TABLE `meetingsManagerDefinition` (
 $moduleTables[] = "CREATE TABLE `meetingsManagerAudienceRule` (
     `meetingsManagerAudienceRuleID` int(10) UNSIGNED ZEROFILL NOT NULL AUTO_INCREMENT,
     `meetingsManagerDefinitionID` int(8) UNSIGNED ZEROFILL NOT NULL,
-    `type` enum('AllTeachingStaff','YearGroup','Department','DepartmentCoordinator','Individual','ExcludeIndividual') NOT NULL,
+    `type` enum('AllTeachingStaff','AllStaff','YearGroup','Department','DepartmentCoordinator','Role','Individual','ExcludeIndividual') NOT NULL,
     `gibbonYearGroupID` int(3) UNSIGNED ZEROFILL DEFAULT NULL,
     `gibbonDepartmentID` int(4) UNSIGNED ZEROFILL DEFAULT NULL,
+    `gibbonRoleID` int(3) UNSIGNED ZEROFILL DEFAULT NULL,
     `gibbonPersonID` int(10) UNSIGNED ZEROFILL DEFAULT NULL,
     PRIMARY KEY (`meetingsManagerAudienceRuleID`),
     KEY `meetingsManagerDefinitionID` (`meetingsManagerDefinitionID`),
     KEY `gibbonYearGroupID` (`gibbonYearGroupID`),
     KEY `gibbonDepartmentID` (`gibbonDepartmentID`),
+    KEY `gibbonRoleID` (`gibbonRoleID`),
     KEY `gibbonPersonID` (`gibbonPersonID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;";
 
@@ -137,17 +142,22 @@ $moduleTables[] = "CREATE TABLE `meetingsManagerException` (
     UNIQUE KEY `meetingsManagerOccurrenceID` (`meetingsManagerOccurrenceID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;";
 
-// A definition-level veto over a specific candidate date, checked by MeetingDateResolver before any
-// other willGenerate logic. Distinct from meetingsManagerException, which cancels/moves/retimes an
-// occurrence that has already been generated - this stops a date from ever being generated at all,
-// e.g. an "Off Timetable" week that isn't a School Closure but shouldn't hold this meeting.
-$moduleTables[] = "CREATE TABLE `meetingsManagerExcludedDate` (
-    `meetingsManagerExcludedDateID` int(10) UNSIGNED ZEROFILL NOT NULL AUTO_INCREMENT,
+// A definition-level human override of a specific candidate date, checked by MeetingDateResolver
+// after every other willGenerate rule. Distinct from meetingsManagerException, which cancels/moves/
+// retimes an occurrence that has already been generated - this decides whether a date is generated
+// at all in the first place, in either direction: 'Exclude' vetoes a date that would otherwise
+// generate (e.g. an "Off Timetable" week that isn't a School Closure but shouldn't hold this
+// meeting), 'Include' forces one that otherwise wouldn't (e.g. publishing anyway on a School
+// Closure day). At most one row per (definition, date) - once the requested state matches what the
+// resolver would produce naturally, the row is deleted rather than kept as a redundant override.
+$moduleTables[] = "CREATE TABLE `meetingsManagerDateOverride` (
+    `meetingsManagerDateOverrideID` int(10) UNSIGNED ZEROFILL NOT NULL AUTO_INCREMENT,
     `meetingsManagerDefinitionID` int(8) UNSIGNED ZEROFILL NOT NULL,
     `date` date NOT NULL,
+    `type` enum('Exclude','Include') NOT NULL DEFAULT 'Exclude',
     `gibbonPersonIDCreated` int(10) UNSIGNED ZEROFILL NOT NULL,
     `timestampCreated` timestamp NULL DEFAULT NULL,
-    PRIMARY KEY (`meetingsManagerExcludedDateID`),
+    PRIMARY KEY (`meetingsManagerDateOverrideID`),
     UNIQUE KEY `meetingsManagerDefinitionID` (`meetingsManagerDefinitionID`,`date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;";
 
@@ -159,15 +169,18 @@ $gibbonSetting[] = "INSERT INTO `gibbonSetting` (`gibbonSettingID`, `scope`, `na
 
 // Action rows
 // One array per action. Meetings Manager is an authorised-staff-only tool - there is no
-// general-staff viewing action, so management is restricted to Admin by default but left
-// available to any Staff-category role via categoryPermissionStaff, so a school can grant it to
-// specific staff without code changes.
+// general-staff viewing action. Management is split into a grouped _all/_my pair (mirroring core's
+// Behaviour module convention exactly): _all is unrestricted (Admin by default), _my is restricted
+// to meetings where the current person is gibbonPersonIDOrganiser (Teacher by default). Both share
+// the identical URLList - isActionAccessible() only answers "can this role enter this page at all",
+// while moduleFunctions.php's meetingsManagerCanManage()/meetingsManagerScope() (built on core's
+// getHighestGroupedAction(), which orders by precedence) answer "which definitions may they touch".
 $actionRows[] = [
-    'name'                      => 'Manage Meetings',
-    'precedence'                => '0',
-    'category'                  => '',
-    'description'               => 'Create, edit, and archive meeting definitions, and generate their native Calendar events.',
-    'URLList'                   => 'meeting_manage.php,meeting_manage_add.php,meeting_manage_addProcess.php,meeting_manage_edit.php,meeting_manage_editProcess.php,meeting_manage_edit_date_addProcess.php,meeting_manage_edit_date_deleteProcess.php,meeting_manage_edit_audience_addProcess.php,meeting_manage_edit_audience_deleteProcess.php,meeting_manage_archiveProcess.php,meeting_manage_preview.php,meeting_manage_preview_excludeDateProcess.php,meeting_manage_preview_includeDateProcess.php,meeting_manage_generateProcess.php,meeting_manage_refreshParticipantsProcess.php,meeting_manage_occurrences.php,meeting_manage_occurrence_exception.php,meeting_manage_occurrence_exceptionProcess.php,meeting_manage_occurrence_exception_deleteProcess.php',
+    'name'                      => 'Manage Meetings_all',
+    'precedence'                => '1',
+    'category'                  => 'Manage Meetings',
+    'description'               => 'Create, edit, and archive any meeting definition, and generate their native Calendar events.',
+    'URLList'                   => 'meeting_manage.php,meeting_manage_add.php,meeting_manage_addProcess.php,meeting_manage_edit.php,meeting_manage_editProcess.php,meeting_manage_edit_date_addProcess.php,meeting_manage_edit_date_deleteProcess.php,meeting_manage_edit_audience_addProcess.php,meeting_manage_edit_audience_deleteProcess.php,meeting_manage_archiveProcess.php,meeting_manage_unarchiveProcess.php,meeting_manage_preview.php,meeting_manage_preview_excludeDateProcess.php,meeting_manage_preview_includeDateProcess.php,meeting_manage_generateProcess.php,meeting_manage_refreshParticipantsProcess.php,meeting_manage_occurrences.php,meeting_manage_occurrence_exception.php,meeting_manage_occurrence_exceptionProcess.php,meeting_manage_occurrence_exception_deleteProcess.php',
     'entryURL'                  => 'meeting_manage.php',
     'entrySidebar'              => 'Y',
     'menuShow'                  => 'Y',
@@ -182,9 +195,28 @@ $actionRows[] = [
     'categoryPermissionOther'   => 'N',
 ];
 $actionRows[] = [
+    'name'                      => 'Manage Meetings_my',
+    'precedence'                => '0',
+    'category'                  => 'Manage Meetings',
+    'description'               => 'Create, edit, and archive meeting definitions the user organises, and generate their native Calendar events. Cannot see or act on meetings organised by anyone else.',
+    'URLList'                   => 'meeting_manage.php,meeting_manage_add.php,meeting_manage_addProcess.php,meeting_manage_edit.php,meeting_manage_editProcess.php,meeting_manage_edit_date_addProcess.php,meeting_manage_edit_date_deleteProcess.php,meeting_manage_edit_audience_addProcess.php,meeting_manage_edit_audience_deleteProcess.php,meeting_manage_archiveProcess.php,meeting_manage_unarchiveProcess.php,meeting_manage_preview.php,meeting_manage_preview_excludeDateProcess.php,meeting_manage_preview_includeDateProcess.php,meeting_manage_generateProcess.php,meeting_manage_refreshParticipantsProcess.php,meeting_manage_occurrences.php,meeting_manage_occurrence_exception.php,meeting_manage_occurrence_exceptionProcess.php,meeting_manage_occurrence_exception_deleteProcess.php',
+    'entryURL'                  => 'meeting_manage.php',
+    'entrySidebar'              => 'Y',
+    'menuShow'                  => 'Y',
+    'defaultPermissionAdmin'    => 'N',
+    'defaultPermissionTeacher'  => 'Y',
+    'defaultPermissionStudent'  => 'N',
+    'defaultPermissionParent'   => 'N',
+    'defaultPermissionSupport'  => 'N',
+    'categoryPermissionStaff'   => 'Y',
+    'categoryPermissionStudent' => 'N',
+    'categoryPermissionParent'  => 'N',
+    'categoryPermissionOther'   => 'N',
+];
+$actionRows[] = [
     'name'                      => 'Manage Meetings Manager Settings',
     'precedence'                => '0',
-    'category'                  => 'Admin',
+    'category'                  => 'Settings',
     'description'               => 'Configure the native Calendar event type used for generated meetings.',
     'URLList'                   => 'settings.php,settingsProcess.php',
     'entryURL'                  => 'settings.php',

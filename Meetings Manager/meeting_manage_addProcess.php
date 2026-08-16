@@ -27,14 +27,24 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $_POST = $container->get(Validator::class)->sanitize($_POST);
 
 $gibbonSchoolYearID = $_POST['gibbonSchoolYearID'] ?? '';
 $name = trim($_POST['name'] ?? '');
 $description = trim($_POST['description'] ?? '');
-$location = trim($_POST['location'] ?? '');
+$locationType = $_POST['locationType'] ?? '';
+$gibbonSpaceID = $_POST['gibbonSpaceID'] ?? '';
+$locationDetail = trim($_POST['locationDetail'] ?? '');
 $gibbonPersonIDOrganiser = $_POST['gibbonPersonIDOrganiser'] ?? '';
+
+// Manage Meetings_my never lets the organiser be anyone but self, regardless of what the form
+// posted - the UI locks this field, but the server is what actually enforces it.
+$scopeToSelf = meetingsManagerScopeToSelf($guid, $connection2, $session);
+if ($scopeToSelf !== null) {
+    $gibbonPersonIDOrganiser = $scopeToSelf;
+}
 $scheduleType = $_POST['scheduleType'] ?? '';
 $timeStart = $_POST['timeStart'] ?? '';
 $timeEnd = $_POST['timeEnd'] ?? '';
@@ -84,11 +94,32 @@ if ($staffGateway->selectStaffByID($gibbonPersonIDOrganiser)->rowCount() == 0) {
     exit;
 }
 
+// Location: Internal requires a real gibbonSpaceID (no dedicated gateway exists for gibbonSpace in
+// core, so this is a direct existence check, same as core's own createSelectSpace() reads it raw).
+// External never stores a space, Internal never stores free text - only one is ever meaningful.
+if ($locationType === 'Internal') {
+    $validSpace = !empty($gibbonSpaceID) && (int) $pdo->selectOne('SELECT COUNT(*) FROM gibbonSpace WHERE gibbonSpaceID=:gibbonSpaceID', ['gibbonSpaceID' => $gibbonSpaceID]) > 0;
+    if (!$validSpace) {
+        $URL .= '&return=errorSpaceRequired';
+        header("Location: {$URL}");
+        exit;
+    }
+    $locationDetail = null;
+} elseif ($locationType === 'External') {
+    $gibbonSpaceID = null;
+} else {
+    $URL .= '&return=error1';
+    header("Location: {$URL}");
+    exit;
+}
+
 $data = [
     'gibbonSchoolYearID'      => $gibbonSchoolYearID,
     'name'                    => $name,
     'description'             => $description,
-    'location'                => $location,
+    'locationType'            => $locationType,
+    'gibbonSpaceID'           => $gibbonSpaceID,
+    'locationDetail'          => $locationDetail,
     'gibbonPersonIDOrganiser' => $gibbonPersonIDOrganiser,
     'scheduleType'            => $scheduleType,
     'timeStart'               => $timeStart,

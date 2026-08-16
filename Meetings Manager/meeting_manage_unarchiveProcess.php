@@ -18,24 +18,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
-use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
 
 require_once '../../gibbon.php';
 require_once __DIR__ . '/moduleFunctions.php';
 
-$meetingsManagerSelectedDateID = $_GET['meetingsManagerSelectedDateID'] ?? '';
 $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
 $gibbonSchoolYearID = $_GET['gibbonSchoolYearID'] ?? '';
 
-$URL = $session->get('absoluteURL').'/index.php?q=/modules/Meetings Manager/meeting_manage_edit.php&meetingsManagerDefinitionID='.$meetingsManagerDefinitionID.'&gibbonSchoolYearID='.$gibbonSchoolYearID;
+$URL = $session->get('absoluteURL').'/index.php?q=/modules/Meetings Manager/meeting_manage.php&gibbonSchoolYearID='.$gibbonSchoolYearID.'&show=archived';
 
-if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_manage_edit.php') == false) {
+if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_manage.php') == false) {
     $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
 }
 
-if (empty($meetingsManagerSelectedDateID) || empty($meetingsManagerDefinitionID)) {
+if (empty($meetingsManagerDefinitionID)) {
     $URL .= '&return=error1';
     header("Location: {$URL}");
     exit;
@@ -44,7 +42,7 @@ if (empty($meetingsManagerSelectedDateID) || empty($meetingsManagerDefinitionID)
 $definitionGateway = $container->get(MeetingDefinitionGateway::class);
 $definition = $definitionGateway->getByID($meetingsManagerDefinitionID);
 
-if (empty($definition) || $definition['active'] != 'Y') {
+if (empty($definition) || $definition['active'] != 'N') {
     $URL .= '&return=error2';
     header("Location: {$URL}");
     exit;
@@ -56,17 +54,13 @@ if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
     exit;
 }
 
-$selectedDateGateway = $container->get(MeetingSelectedDateGateway::class);
-$row = $selectedDateGateway->getByID($meetingsManagerSelectedDateID);
-
-// Ownership check - only ever delete a row that genuinely belongs to this definition.
-if (empty($row) || (string) $row['meetingsManagerDefinitionID'] !== (string) $meetingsManagerDefinitionID) {
-    $URL .= '&return=error2';
-    header("Location: {$URL}");
-    exit;
-}
-
-$selectedDateGateway->delete($meetingsManagerSelectedDateID);
+// No Reconciler involvement needed - archiving already removed every future occurrence row and its
+// Calendar event, leaving only past history untouched. Flipping active back to Y is the whole
+// operation; the user reviews and regenerates future dates through the normal Preview flow.
+$definitionGateway->update($meetingsManagerDefinitionID, [
+    'active' => 'Y',
+    'timestampModified' => date('Y-m-d H:i:s'),
+]);
 
 $URL .= '&return=success0';
 header("Location: {$URL}");

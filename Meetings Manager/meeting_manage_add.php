@@ -24,6 +24,7 @@ use Gibbon\Domain\School\SchoolYearGateway;
 use Gibbon\Domain\School\DaysOfWeekGateway;
 use Gibbon\Domain\Timetable\TimetableGateway;
 use Gibbon\Domain\Timetable\TimetableDayGateway;
+use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 
 require_once __DIR__ . '/moduleFunctions.php';
 
@@ -32,15 +33,26 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
     $page->addError(__('You do not have access to this action.'));
 } else {
     // Proceed!
+    $page->return->addReturn('errorSpaceRequired', __('Your request failed because a Space is required for Internal meetings.'));
+
     $gibbonSchoolYearID = $_GET['gibbonSchoolYearID'] ?? '';
 
     $page->breadcrumbs
         ->add(__('Manage Meetings'), 'meeting_manage.php', ['gibbonSchoolYearID' => $gibbonSchoolYearID])
         ->add(__('Add Meeting'));
 
+    $justCreatedDefinition = null;
     if (isset($_GET['editID'])) {
         $editLink = $session->get('absoluteURL').'/index.php?q=/modules/Meetings Manager/meeting_manage_edit.php&meetingsManagerDefinitionID='.$_GET['editID'].'&gibbonSchoolYearID='.$gibbonSchoolYearID;
         $page->return->setEditLink($editLink);
+
+        // The meeting itself was just created (see meeting_manage_addProcess.php's redirect) - offer
+        // to configure its Audience right here, without a separate trip to Edit. Re-check ownership
+        // even though the create just succeeded, in case the definition was somehow reassigned.
+        $justCreatedDefinition = $container->get(MeetingDefinitionGateway::class)->getDefinitionDetailsByID($_GET['editID']);
+        if (empty($justCreatedDefinition) || !meetingsManagerCanManage($guid, $connection2, $session, $justCreatedDefinition)) {
+            $justCreatedDefinition = null;
+        }
     }
 
     if (empty($gibbonSchoolYearID)) {
@@ -53,6 +65,8 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $page->addError(__('The specified record does not exist.'));
         return;
     }
+
+    $scopedToSelf = meetingsManagerScopeToSelf($guid, $connection2, $session) !== null;
 
     $form = Form::create('add', $session->get('absoluteURL').'/modules/'.$session->get('module').'/meeting_manage_addProcess.php');
     $form->setFactory(DatabaseFormFactory::create($pdo));
@@ -75,12 +89,28 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addTextArea('description')->setRows(3);
 
     $row = $form->addRow();
-        $row->addLabel('location', __('Location'));
-        $row->addTextField('location')->maxLength(255);
+        $row->addLabel('locationType', __('Location Type'));
+        $row->addSelect('locationType')->fromArray(['Internal' => __('Internal'), 'External' => __('External')])->required()->selected('Internal');
+
+    $form->toggleVisibilityByClass('internal')->onSelect('locationType')->when('Internal');
+    $row = $form->addRow()->addClass('internal');
+        $row->addLabel('gibbonSpaceID', __('Space'));
+        $row->addSelectSpace('gibbonSpaceID')->required();
+
+    $form->toggleVisibilityByClass('external')->onSelect('locationType')->when('External');
+    $row = $form->addRow()->addClass('external');
+        $row->addLabel('locationDetail', __('Location Detail'));
+        $row->addTextField('locationDetail')->maxLength(255);
 
     $row = $form->addRow();
         $row->addLabel('gibbonPersonIDOrganiser', __('Organiser'));
-        $row->addSelectStaff('gibbonPersonIDOrganiser')->required()->selected($session->get('gibbonPersonID'));
+        if ($scopedToSelf) {
+            // Manage Meetings_my never lets the organiser be anyone but self - locked, and the
+            // process script re-forces this server-side regardless of what's actually posted here.
+            $row->addTextField('gibbonPersonIDOrganiserDisplay')->readonly()->setValue(Format::name('', $session->get('preferredName'), $session->get('surname'), 'Staff', true, true));
+        } else {
+            $row->addSelectStaff('gibbonPersonIDOrganiser')->required()->selected($session->get('gibbonPersonID'));
+        }
 
     $form->addRow()->addHeading(__('Schedule'));
 
@@ -158,4 +188,22 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addSubmit();
 
     echo $form->getOutput();
+
+    // ---------------------------------------------------------------
+    // Audience - only shown once a meeting has actually been created (via the editID redirect from
+    // meeting_manage_addProcess.php), since audience rules need a real meetingsManagerDefinitionID.
+    // Reuses the exact same rendering as meeting_manage_edit.php's Audience section.
+    // ---------------------------------------------------------------
+
+    if ($justCreatedDefinition !== null) {
+        $page->addMessage(sprintf(__('"%1$s" was created. Now add who should attend below.'), htmlspecialchars($justCreatedDefinition['name'])));
+
+        // A container purely for the shared section's layout/styling - its own default action is
+        // never actually used, since the Add Rule button inside it overrides its target via
+        // formaction, and rule removal is a plain link, not a submission.
+        $audienceContainer = Form::create('audience', $editLink);
+        meetingsManagerRenderAudienceSection($container, $pdo, $session, $audienceContainer, $justCreatedDefinition);
+
+        echo $audienceContainer->getOutput();
+    }
 }

@@ -18,9 +18,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
-use Gibbon\Module\MeetingsManager\Domain\MeetingExcludedDateGateway;
+use Gibbon\Module\MeetingsManager\Domain\MeetingDateOverrideGateway;
+use Gibbon\Module\MeetingsManager\MeetingDateResolver;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
 $gibbonSchoolYearID = $_GET['gibbonSchoolYearID'] ?? '';
@@ -49,10 +51,48 @@ if (empty($definition) || $definition['active'] != 'Y') {
     exit;
 }
 
-$container->get(MeetingExcludedDateGateway::class)->deleteWhere([
-    'meetingsManagerDefinitionID' => $meetingsManagerDefinitionID,
-    'date' => $date,
-]);
+if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
+    header("Location: {$URL}");
+    exit;
+}
+
+// The candidate must genuinely come from the schedule's own date-generation - this can never be
+// used to invent a date the resolver wouldn't otherwise have proposed (e.g. a Week B date with no
+// corresponding gibbonTTDayDate tie).
+$candidates = $container->get(MeetingDateResolver::class)->resolve($definition, null);
+$candidate = null;
+foreach ($candidates as $c) {
+    if ($c['date'] === $date) {
+        $candidate = $c;
+        break;
+    }
+}
+
+if ($candidate === null) {
+    $URL .= '&return=error1';
+    header("Location: {$URL}");
+    exit;
+}
+
+$dateOverrideGateway = $container->get(MeetingDateOverrideGateway::class);
+
+if ($candidate['naturalWillGenerate'] === true) {
+    // Requested state (included) already matches what the resolver would produce naturally - no
+    // override needed. If one exists (e.g. a stale Exclude from before circumstances changed),
+    // remove it rather than leave a redundant row behind.
+    $dateOverrideGateway->deleteWhere(['meetingsManagerDefinitionID' => $meetingsManagerDefinitionID, 'date' => $date]);
+} else {
+    $dateOverrideGateway->insertAndUpdate([
+        'meetingsManagerDefinitionID' => $meetingsManagerDefinitionID,
+        'date' => $date,
+        'type' => 'Include',
+        'gibbonPersonIDCreated' => $session->get('gibbonPersonID'),
+        'timestampCreated' => date('Y-m-d H:i:s'),
+    ], [
+        'type' => 'Include',
+    ]);
+}
 
 $URL .= '&return=success0';
 header("Location: {$URL}");

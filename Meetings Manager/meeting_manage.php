@@ -45,7 +45,7 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
     $page->navigator->addSchoolYearNavigation($gibbonSchoolYearID);
 
     $definitionGateway = $container->get(MeetingDefinitionGateway::class);
-    $definitions = $definitionGateway->selectDefinitionsBySchoolYear($gibbonSchoolYearID, $active);
+    $definitions = $definitionGateway->selectDefinitionsBySchoolYear($gibbonSchoolYearID, $active, meetingsManagerScopeToSelf($guid, $connection2, $session));
 
     $table = DataTable::create('meetings');
 
@@ -120,6 +120,12 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
                     ->setURL('/modules/Meetings Manager/meeting_manage_archiveProcess.php')
                     ->directLink()
                     ->addConfirmation(__('Archive this meeting series? Future generated meetings will be removed from the calendar. Past meetings are not affected. The meeting and its history remain available under Archived Meetings.'));
+            } else {
+                $actions->addAction('unarchive', __('Unarchive Meeting Series'))
+                    ->setIcon('refresh')
+                    ->setURL('/modules/Meetings Manager/meeting_manage_unarchiveProcess.php')
+                    ->directLink()
+                    ->addConfirmation(__('Unarchive this meeting series? It becomes Active again, but no Calendar events are generated automatically - review it in Preview and generate when ready.'));
             }
         });
 

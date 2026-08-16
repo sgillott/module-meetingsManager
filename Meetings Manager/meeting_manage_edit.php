@@ -26,8 +26,6 @@ use Gibbon\Domain\Timetable\TimetableGateway;
 use Gibbon\Domain\Timetable\TimetableDayGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
-use Gibbon\Module\MeetingsManager\Domain\MeetingAudienceRuleGateway;
-use Gibbon\Module\MeetingsManager\AudienceResolver;
 
 require_once __DIR__ . '/moduleFunctions.php';
 
@@ -36,6 +34,8 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
     $page->addError(__('You do not have access to this action.'));
 } else {
     // Proceed!
+    $page->return->addReturn('errorSpaceRequired', __('Your request failed because a Space is required for Internal meetings.'));
+
     $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
     $gibbonSchoolYearID = $_GET['gibbonSchoolYearID'] ?? '';
 
@@ -57,6 +57,13 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $page->addError(__('The specified record does not exist.'));
         return;
     }
+
+    if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+        $page->addError(__('You do not have access to this action.'));
+        return;
+    }
+
+    $scopedToSelf = meetingsManagerScopeToSelf($guid, $connection2, $session) !== null;
 
     $schoolYear = $container->get(SchoolYearGateway::class)->getByID($definition['gibbonSchoolYearID']);
 
@@ -90,12 +97,28 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addTextArea('description')->setRows(3)->setValue($definition['description']);
 
     $row = $form->addRow();
-        $row->addLabel('location', __('Location'));
-        $row->addTextField('location')->maxLength(255)->setValue($definition['location']);
+        $row->addLabel('locationType', __('Location Type'));
+        $row->addSelect('locationType')->fromArray(['Internal' => __('Internal'), 'External' => __('External')])->required()->selected($definition['locationType']);
+
+    $form->toggleVisibilityByClass('internal')->onSelect('locationType')->when('Internal');
+    $row = $form->addRow()->addClass('internal');
+        $row->addLabel('gibbonSpaceID', __('Space'));
+        $row->addSelectSpace('gibbonSpaceID')->required()->selected($definition['gibbonSpaceID'] ?? '');
+
+    $form->toggleVisibilityByClass('external')->onSelect('locationType')->when('External');
+    $row = $form->addRow()->addClass('external');
+        $row->addLabel('locationDetail', __('Location Detail'));
+        $row->addTextField('locationDetail')->maxLength(255)->setValue($definition['locationDetail'] ?? '');
 
     $row = $form->addRow();
         $row->addLabel('gibbonPersonIDOrganiser', __('Organiser'));
-        $row->addSelectStaff('gibbonPersonIDOrganiser')->required()->selected($definition['gibbonPersonIDOrganiser']);
+        if ($scopedToSelf) {
+            // Manage Meetings_my never lets the organiser be reassigned - locked to self, and the
+            // process script re-forces this server-side regardless of what's actually posted here.
+            $row->addTextField('gibbonPersonIDOrganiserDisplay')->readonly()->setValue($definition['organiserName'] ?? '');
+        } else {
+            $row->addSelectStaff('gibbonPersonIDOrganiser')->required()->selected($definition['gibbonPersonIDOrganiser']);
+        }
 
     $form->addRow()->addHeading(__('Schedule'));
 
@@ -164,6 +187,13 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         $row->addLabel('rangeEnd', __('To'))->description(sprintf(__('Defaults to %1$s if left blank.'), Format::date($schoolYear['lastDay'] ?? '')));
         $row->addDate('rangeEnd')->setValue($definition['rangeEnd']);
 
+    // ---------------------------------------------------------------
+    // Audience - injected into the same $form as rows (list + Add Rule picker together), so it
+    // renders as one boxed section (matching Meeting/Schedule) above Submit.
+    // ---------------------------------------------------------------
+
+    meetingsManagerRenderAudienceSection($container, $pdo, $session, $form, $definition);
+
     $row = $form->addRow();
         $row->addFooter();
         $row->addSubmit();
@@ -205,72 +235,6 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
 
         echo $dateForm->getOutput();
     }
-
-    // ---------------------------------------------------------------
-    // Audience Rules
-    // ---------------------------------------------------------------
-
-    echo '<h3>'.__('Audience').'</h3>';
-
-    $ruleGateway = $container->get(MeetingAudienceRuleGateway::class);
-    $rules = $ruleGateway->selectRulesByDefinition($meetingsManagerDefinitionID)->fetchAll();
-    $audienceResolver = $container->get(AudienceResolver::class);
-
-    if (empty($rules)) {
-        echo '<p><i>'.__('No audience rules have been added yet. No participants will be resolved until at least one inclusion rule is added.').'</i></p>';
-    } else {
-        echo '<table class="smallIntBorder w-full">';
-        foreach ($rules as $rule) {
-            echo '<tr><td>'.htmlspecialchars($audienceResolver->describeRule($rule)).'</td><td class="w-16 text-right">';
-            echo '<a class="text-red-700" href="'.$session->get('absoluteURL').'/modules/Meetings Manager/meeting_manage_edit_audience_deleteProcess.php?meetingsManagerAudienceRuleID='.$rule['meetingsManagerAudienceRuleID'].'&meetingsManagerDefinitionID='.$meetingsManagerDefinitionID.'&gibbonSchoolYearID='.$gibbonSchoolYearID.'" onclick="return confirm(\''.__('Are you sure you want to remove this rule?').'\')">'.__('Remove').'</a>';
-            echo '</td></tr>';
-        }
-        echo '</table>';
-
-        $resolved = $audienceResolver->resolve((int) $definition['gibbonSchoolYearID'], $rules);
-        echo '<p>'.sprintf(__('Resolved Participants: %1$s'), count($resolved)).'</p>';
-    }
-
-    $ruleTypes = [
-        'AllTeachingStaff'      => __('All Teaching Staff'),
-        'YearGroup'             => __('Teachers of Selected Year Groups'),
-        'Department'            => __('Staff in Selected Departments'),
-        'DepartmentCoordinator' => __('Department Coordinators'),
-        'Individual'            => __('Specific Staff'),
-        'ExcludeIndividual'     => __('Exclude Individual'),
-    ];
-
-    $ruleForm = Form::create('addRule', $session->get('absoluteURL').'/modules/'.$session->get('module').'/meeting_manage_edit_audience_addProcess.php');
-    $ruleForm->setFactory(DatabaseFormFactory::create($pdo));
-    $ruleForm->addHiddenValue('address', $session->get('address'));
-    $ruleForm->addHiddenValue('meetingsManagerDefinitionID', $meetingsManagerDefinitionID);
-    $ruleForm->addHiddenValue('gibbonSchoolYearID', $gibbonSchoolYearID);
-
-    $row = $ruleForm->addRow();
-        $row->addLabel('type', __('Add Audience Rule'));
-        $row->addSelect('type')->fromArray($ruleTypes)->required()->placeholder();
-
-    // Year Groups/Departments/Staff can each be multi-selected - picking 3 Year Groups adds 3 rules
-    // in one step rather than requiring the form to be submitted 3 times.
-    $ruleForm->toggleVisibilityByClass('ruleYearGroup')->onSelect('type')->when('YearGroup');
-    $row = $ruleForm->addRow()->addClass('ruleYearGroup');
-        $row->addLabel('gibbonYearGroupID', __('Year Groups'));
-        $row->addSelectYearGroup('gibbonYearGroupID')->selectMultiple();
-
-    $ruleForm->toggleVisibilityByClass('ruleDepartment')->onSelect('type')->when(['Department', 'DepartmentCoordinator']);
-    $row = $ruleForm->addRow()->addClass('ruleDepartment');
-        $row->addLabel('gibbonDepartmentID', __('Departments'));
-        $row->addSelectDepartment('gibbonDepartmentID')->selectMultiple();
-
-    $ruleForm->toggleVisibilityByClass('ruleIndividual')->onSelect('type')->when(['Individual', 'ExcludeIndividual']);
-    $row = $ruleForm->addRow()->addClass('ruleIndividual');
-        $row->addLabel('gibbonPersonID', __('Staff Member(s)'));
-        $row->addSelectStaff('gibbonPersonID')->selectMultiple();
-
-    $row = $ruleForm->addRow();
-        $row->addSubmit(__('Add Rule'));
-
-    echo $ruleForm->getOutput();
 
     }
 }

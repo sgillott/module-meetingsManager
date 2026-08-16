@@ -26,6 +26,7 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $_POST = $container->get(Validator::class)->sanitize($_POST);
 
@@ -33,7 +34,9 @@ $meetingsManagerDefinitionID = $_POST['meetingsManagerDefinitionID'] ?? '';
 $gibbonSchoolYearID = $_POST['gibbonSchoolYearID'] ?? '';
 $name = trim($_POST['name'] ?? '');
 $description = trim($_POST['description'] ?? '');
-$location = trim($_POST['location'] ?? '');
+$locationType = $_POST['locationType'] ?? '';
+$gibbonSpaceID = $_POST['gibbonSpaceID'] ?? '';
+$locationDetail = trim($_POST['locationDetail'] ?? '');
 $gibbonPersonIDOrganiser = $_POST['gibbonPersonIDOrganiser'] ?? '';
 $scheduleType = $_POST['scheduleType'] ?? '';
 $timeStart = $_POST['timeStart'] ?? '';
@@ -67,11 +70,23 @@ if (empty($existing)) {
     exit;
 }
 
+if (!meetingsManagerCanManage($guid, $connection2, $session, $existing)) {
+    $URL .= '&return=error0';
+    header("Location: {$URL}");
+    exit;
+}
+
 if ($existing['active'] != 'Y') {
     // Archived definitions are read-only in v1.
     $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
+}
+
+// Manage Meetings_my never lets the organiser be reassigned, regardless of what the form posted -
+// the UI locks this field, but the server is what actually enforces it.
+if (meetingsManagerScopeToSelf($guid, $connection2, $session) !== null) {
+    $gibbonPersonIDOrganiser = $session->get('gibbonPersonID');
 }
 
 $validScheduleTypes = ['Single', 'SelectedDates', 'Weekly', 'TimetableCycle'];
@@ -94,10 +109,31 @@ if ($staffGateway->selectStaffByID($gibbonPersonIDOrganiser)->rowCount() == 0) {
     exit;
 }
 
+// Location: Internal requires a real gibbonSpaceID (no dedicated gateway exists for gibbonSpace in
+// core, so this is a direct existence check, same as core's own createSelectSpace() reads it raw).
+// External never stores a space, Internal never stores free text - only one is ever meaningful.
+if ($locationType === 'Internal') {
+    $validSpace = !empty($gibbonSpaceID) && (int) $pdo->selectOne('SELECT COUNT(*) FROM gibbonSpace WHERE gibbonSpaceID=:gibbonSpaceID', ['gibbonSpaceID' => $gibbonSpaceID]) > 0;
+    if (!$validSpace) {
+        $URL .= '&return=errorSpaceRequired';
+        header("Location: {$URL}");
+        exit;
+    }
+    $locationDetail = null;
+} elseif ($locationType === 'External') {
+    $gibbonSpaceID = null;
+} else {
+    $URL .= '&return=error1';
+    header("Location: {$URL}");
+    exit;
+}
+
 $data = [
     'name'                    => $name,
     'description'             => $description,
-    'location'                => $location,
+    'locationType'            => $locationType,
+    'gibbonSpaceID'           => $gibbonSpaceID,
+    'locationDetail'          => $locationDetail,
     'gibbonPersonIDOrganiser' => $gibbonPersonIDOrganiser,
     'scheduleType'            => $scheduleType,
     'timeStart'               => $timeStart,

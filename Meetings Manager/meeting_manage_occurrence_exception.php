@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 use Gibbon\Forms\Form;
 use Gibbon\Services\Format;
+use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingOccurrenceGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingExceptionGateway;
 
@@ -48,6 +49,12 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
 
     if (empty($occurrence) || (string) $occurrence['meetingsManagerDefinitionID'] !== (string) $meetingsManagerDefinitionID) {
         $page->addError(__('The specified record does not exist.'));
+        return;
+    }
+
+    $definition = $container->get(MeetingDefinitionGateway::class)->getByID($meetingsManagerDefinitionID);
+    if (empty($definition) || !meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+        $page->addError(__('You do not have access to this action.'));
         return;
     }
 

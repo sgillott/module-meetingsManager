@@ -190,8 +190,9 @@ class CalendarEventService
             'dateEnd'                   => $schedule['date'],
             'timeStart'                 => $schedule['timeStart'],
             'timeEnd'                   => $schedule['timeEnd'],
-            'locationType'              => 'External',
-            'locationDetail'            => $definition['location'] ?? '',
+            'locationType'              => $definition['locationType'] ?? 'External',
+            'gibbonSpaceID'             => $definition['gibbonSpaceID'] ?? null,
+            'locationDetail'            => $definition['locationDetail'] ?? '',
             'locationURL'               => '',
             // Diagnostic provenance only - NOT proof of ownership. Native Calendar's "Duplicate
             // Event" bulk action (calendar_event_manageProcessBulk.php) blindly copies these two
@@ -231,7 +232,9 @@ class CalendarEventService
             'dateEnd'                 => $schedule['date'],
             'timeStart'               => $schedule['timeStart'],
             'timeEnd'                 => $schedule['timeEnd'],
-            'locationDetail'          => $definition['location'] ?? '',
+            'locationType'            => $definition['locationType'] ?? 'External',
+            'gibbonSpaceID'           => $definition['gibbonSpaceID'] ?? null,
+            'locationDetail'          => $definition['locationDetail'] ?? '',
             'gibbonPersonIDOrganiser' => $definition['gibbonPersonIDOrganiser'],
             'gibbonPersonIDModified'  => $actingPersonID,
             'timestampModified'       => date('Y-m-d H:i:s'),

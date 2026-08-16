@@ -70,13 +70,17 @@ class AudienceSummary
             $byType[$rule['type']][] = $rule;
         }
 
-        // AllTeachingStaff dominates - combining it with narrower inclusion rules is redundant
-        // configuration, but still describable as just "All Teaching Staff".
+        // AllStaff/AllTeachingStaff dominate - combining either with narrower inclusion rules is
+        // redundant configuration, but still describable as just the one phrase. AllStaff is the
+        // broader of the two, so it wins if a (redundant) combination of both is ever configured.
+        if (isset($byType['AllStaff'])) {
+            return [__('All Staff')];
+        }
         if (isset($byType['AllTeachingStaff'])) {
             return [__('All Teaching Staff')];
         }
 
-        $knownTypes = ['YearGroup', 'Department', 'DepartmentCoordinator', 'Individual'];
+        $knownTypes = ['YearGroup', 'Department', 'DepartmentCoordinator', 'Individual', 'Role'];
         if (!empty(array_diff(array_keys($byType), $knownTypes))) {
             return null;
         }
@@ -97,6 +101,11 @@ class AudienceSummary
             $names = array_map(fn($rule) => $rule['departmentName'] ?? __('Unknown Department'), $byType['DepartmentCoordinator']);
             $label = count($names) === 1 ? __('Coordinator') : __('Coordinators');
             $phrases[] = sprintf(__('%1$s Department %2$s'), $this->joinNames($names), $label);
+        }
+
+        if (!empty($byType['Role'])) {
+            $names = array_map(fn($rule) => $rule['roleName'] ?? __('Unknown Role'), $byType['Role']);
+            $phrases[] = sprintf(__('%1$s Role Members'), $this->joinNames($names));
         }
 
         if (!empty($byType['Individual'])) {

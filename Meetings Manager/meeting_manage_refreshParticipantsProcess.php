@@ -21,6 +21,7 @@ use Gibbon\Module\MeetingsManager\Domain\MeetingDefinitionGateway;
 use Gibbon\Module\MeetingsManager\MeetingReconciler;
 
 require_once '../../gibbon.php';
+require_once __DIR__ . '/moduleFunctions.php';
 
 $meetingsManagerDefinitionID = $_GET['meetingsManagerDefinitionID'] ?? '';
 $gibbonSchoolYearID = $_GET['gibbonSchoolYearID'] ?? '';
@@ -44,6 +45,12 @@ $definition = $definitionGateway->getByID($meetingsManagerDefinitionID);
 
 if (empty($definition) || $definition['active'] != 'Y') {
     $URL .= '&return=error2';
+    header("Location: {$URL}");
+    exit;
+}
+
+if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+    $URL .= '&return=error0';
     header("Location: {$URL}");
     exit;
 }

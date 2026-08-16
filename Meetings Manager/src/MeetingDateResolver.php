@@ -9,7 +9,7 @@ use Gibbon\Domain\School\SchoolYearSpecialDayGateway;
 use Gibbon\Domain\School\SchoolYearTermGateway;
 use Gibbon\Domain\Timetable\TimetableDayGateway;
 use Gibbon\Module\MeetingsManager\Domain\MeetingSelectedDateGateway;
-use Gibbon\Module\MeetingsManager\Domain\MeetingExcludedDateGateway;
+use Gibbon\Module\MeetingsManager\Domain\MeetingDateOverrideGateway;
 
 /**
  * Meeting Date Resolver
@@ -26,7 +26,7 @@ class MeetingDateResolver
 {
     private $db;
     private $selectedDateGateway;
-    private $excludedDateGateway;
+    private $dateOverrideGateway;
     private $timetableDayGateway;
     private $schoolYearGateway;
     private $schoolYearTermGateway;
@@ -36,7 +36,7 @@ class MeetingDateResolver
     public function __construct(
         Connection $db,
         MeetingSelectedDateGateway $selectedDateGateway,
-        MeetingExcludedDateGateway $excludedDateGateway,
+        MeetingDateOverrideGateway $dateOverrideGateway,
         TimetableDayGateway $timetableDayGateway,
         SchoolYearGateway $schoolYearGateway,
         SchoolYearTermGateway $schoolYearTermGateway,
@@ -45,7 +45,7 @@ class MeetingDateResolver
     ) {
         $this->db = $db;
         $this->selectedDateGateway = $selectedDateGateway;
-        $this->excludedDateGateway = $excludedDateGateway;
+        $this->dateOverrideGateway = $dateOverrideGateway;
         $this->timetableDayGateway = $timetableDayGateway;
         $this->schoolYearGateway = $schoolYearGateway;
         $this->schoolYearTermGateway = $schoolYearTermGateway;
@@ -77,14 +77,14 @@ class MeetingDateResolver
                 $dates = [];
         }
 
-        $excludedDates = $this->excludedDateGateway
+        $overrides = $this->dateOverrideGateway
             ->selectDatesByDefinition($definition['meetingsManagerDefinitionID'])
             ->fetchAll();
-        $excludedDates = array_flip(array_column($excludedDates, 'date'));
+        $overridesByDate = array_column($overrides, 'type', 'date');
 
         $candidates = [];
         foreach ($dates as $dateInfo) {
-            $candidates[] = $this->annotate($dateInfo['date'], $definition, $dateInfo, $timetableName, $excludedDates);
+            $candidates[] = $this->annotate($dateInfo['date'], $definition, $dateInfo, $timetableName, $overridesByDate);
         }
 
         usort($candidates, function ($a, $b) {
@@ -238,10 +238,13 @@ class MeetingDateResolver
 
     /**
      * The common school-calendar annotation stage every candidate date passes through, regardless of
-     * scheduleType. Keeps isSchoolOpen and willGenerate as separate fields per the approved design:
-     * Weekly/TimetableCycle exclude on School Closure, Single/SelectedDates only warn.
+     * scheduleType. A School Closure, term boundary, or non-school-day naturally excludes a
+     * candidate the same way for every schedule type - there is no "trust the human's deliberate
+     * choice" exception for Single/SelectedDates. The date-override mechanism below (see class
+     * docblock) is the sole, explicit way to publish anyway; the resolver itself never defaults to
+     * including a date the school calendar says is closed.
      */
-    private function annotate(string $date, array $definition, array $dateInfo, ?string $timetableName, array $excludedDates = []): array
+    private function annotate(string $date, array $definition, array $dateInfo, ?string $timetableName, array $overridesByDate = []): array
     {
         $dayOfWeekRow = $this->daysOfWeekGateway->getDayOfWeekByDate($date);
         $dayOfWeekName = $dayOfWeekRow['name'] ?? date('l', strtotime($date));
@@ -266,44 +269,41 @@ class MeetingDateResolver
 
         $isSchoolOpen = $inTerm && $isSchoolDay && $schoolClosure === null;
 
-        $isRecurring = in_array($definition['scheduleType'], ['Weekly', 'TimetableCycle'], true);
-
-        if ($isRecurring) {
-            $willGenerate = $isSchoolOpen;
-            if ($willGenerate) {
-                $status = __('Will Create');
-                $reason = null;
-            } elseif ($schoolClosure !== null) {
-                $status = __('Excluded: School Closure');
-                $reason = $schoolClosure['name'] ?? __('School Closure');
-            } elseif (!$inTerm) {
-                $status = __('Excluded: Outside School Year');
-                $reason = __('This date does not fall within any school year term.');
-            } else {
-                $status = __('Excluded: Not a School Day');
-                $reason = sprintf(__('%1$s is not configured as a school day.'), $dayOfWeekName);
-            }
+        $willGenerate = $isSchoolOpen;
+        if ($willGenerate) {
+            $status = __('Will Create');
+            $reason = null;
+        } elseif ($schoolClosure !== null) {
+            $status = __('Excluded: School Closure');
+            $reason = $schoolClosure['name'] ?? __('School Closure');
+        } elseif (!$inTerm) {
+            $status = __('Excluded: Outside School Year');
+            $reason = __('This date does not fall within any school year term.');
         } else {
-            // Single / SelectedDates - deliberate human choice, always generated.
-            $willGenerate = true;
-            if ($isSchoolOpen) {
-                $status = __('Will Create');
-                $reason = null;
-            } else {
-                $status = __('Will Create: Warning');
-                $reason = $schoolClosure !== null
-                    ? sprintf(__('School is closed on this date (%1$s).'), $schoolClosure['name'] ?? __('School Closure'))
-                    : __('School is not open on this date.');
-            }
+            $status = __('Excluded: Not a School Day');
+            $reason = sprintf(__('%1$s is not configured as a school day.'), $dayOfWeekName);
         }
 
-        // A manual exclusion is a deliberate human veto and takes priority over every rule above,
-        // regardless of scheduleType - including Single/SelectedDates, which otherwise always generate.
-        $manuallyExcluded = isset($excludedDates[$date]);
-        if ($manuallyExcluded) {
+        // The natural (pre-override) answer, captured before a human veto/force is applied - callers
+        // that need to decide whether a *requested* checkbox state actually requires storing an
+        // override (i.e. whether it differs from what the resolver would produce on its own) read
+        // this rather than re-deriving school-day/term/closure logic themselves.
+        $naturalWillGenerate = $willGenerate;
+        $naturalReason = $reason;
+
+        // A manual override is a deliberate human decision and takes priority over every rule above,
+        // for any scheduleType. Wording deliberately spells out that this is an override, not the
+        // system's own default, so it's never mistaken for "the system decided to include this" -
+        // it always reads as "this would normally be excluded, but a human overrode that".
+        $override = $overridesByDate[$date] ?? null;
+        if ($override === 'Exclude') {
             $willGenerate = false;
             $status = __('Excluded: Manually Excluded');
             $reason = __('This date was manually excluded.');
+        } elseif ($override === 'Include') {
+            $willGenerate = true;
+            $status = __('Manually Included');
+            $reason = $naturalWillGenerate ? null : sprintf(__('This date would normally be excluded, but you have deliberately included it. (%1$s)'), $naturalReason);
         }
 
         return [
@@ -319,7 +319,8 @@ class MeetingDateResolver
             'schoolClosure' => $schoolClosure,
             'offTimetable' => $offTimetable,
             'timingChange' => $timingChange,
-            'manuallyExcluded' => $manuallyExcluded,
+            'naturalWillGenerate' => $naturalWillGenerate,
+            'override' => $override,
             'willGenerate' => $willGenerate,
             'status' => $status,
             'reason' => $reason,

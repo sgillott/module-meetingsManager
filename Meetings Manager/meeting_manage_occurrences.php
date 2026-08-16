@@ -51,6 +51,11 @@ if (isActionAccessible($guid, $connection2, '/modules/Meetings Manager/meeting_m
         return;
     }
 
+    if (!meetingsManagerCanManage($guid, $connection2, $session, $definition)) {
+        $page->addError(__('You do not have access to this action.'));
+        return;
+    }
+
     echo '<h3>'.htmlspecialchars($definition['name']).'</h3>';
     echo '<p>'.htmlspecialchars(meetingsManagerScheduleSummary($definition)).'</p>';
 
